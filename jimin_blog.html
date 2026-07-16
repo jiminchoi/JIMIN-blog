@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>*JIMIN Blog.*</title>
+    <!-- Google Fonts: Gothic, Mincho, and Rounded Styles for Japanese -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;700;900&family=Noto+Serif+JP:wght@400;700;900&family=Zen+Maru_Gothic:wght@400;700;900&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- FontAwesome for fallback & brand icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- React and Babel CDN for zero-config running -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Firebase App & Firestore via ES Modules support in browser -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, updateDoc, increment, addDoc, orderBy, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        
+        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, setDoc, getDoc, getDocs, collection, query, updateDoc, increment, addDoc, orderBy, where, onSnapshot };
+    </script>
+
+    <style>
+        /* CSS Fonts Configuration */
+        .font-gothic {
+            font-family: 'M PLUS 1p', sans-serif;
+        }
+        .font-mincho {
+            font-family: 'Noto Serif JP', serif;
+        }
+        .font-rounded {
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+
+        /* Custom scrollbar styling to fit dark blue aesthetics */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.8);
+        }
+
+        /* Ambient glow for the main title */
+        .glow-text {
+            text-shadow: 0 0 15px rgba(59, 130, 246, 0.6), 0 0 30px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Glassmorphism utility card */
+        .glass-card {
+            background: rgba(30, 41, 59, 0.45);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .sakura-glass {
+            background: rgba(253, 244, 245, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(244, 63, 94, 0.15);
+        }
+
+        .forest-glass {
+            background: rgba(20, 35, 20, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .white-glass {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-gothic transition-colors duration-500">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Default Fallback Database to ensure immediate display if Firebase is not configured yet
+        const DEFAULT_POSTS = [
+            {
+                id: "demo-post-1",
+                title: "新しい始まり、新しい風 🌸",
+                content: "今日から新しい挑戦が始まります。期待と緊張が半分ずつですが、一歩一歩進んでいきたいと思います。応援よろしくお願いします！",
+                author: "Jimin",
+                coverType: "preset",
+                coverPreset: "linear-gradient(135deg, #1e3a8a, #3b82f6)",
+                likes: 12,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: "demo-post-2",
+                title: "雨の日のカフェ巡り ☕",
+                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨の音を聴きながら飲む暖かいブレンドコーヒーは格別でした。皆様も良い一日を。",
+                author: "管理者",
+                coverType: "preset",
+                coverPreset: "linear-gradient(135deg, #0f172a, #1e293b)",
+                likes: 8,
+                createdAt: new Date(Date.now() - 86400000).toISOString()
+            }
+        ];
+
+        function App() {
+            // --- UI & Customization States ---
+            const [currentTab, setCurrentTab] = useState("home"); // 'home' | 'write' | 'custom'
+            const [theme, setTheme] = useState("deep-blue"); // 'deep-blue' | 'sakura' | 'forest' | 'classic'
+            const [fontStyle, setFontStyle] = useState("font-gothic"); // 'font-gothic' | 'font-mincho' | 'font-rounded'
+            
+            // --- User Auth States ---
+            const [user, setUser] = useState(null); // { id, nickname, isGuest }
+            const [loginId, setLoginId] = useState("");
+            const [loginPw, setLoginPw] = useState("");
+            const [regId, setRegId] = useState("");
+            const [regPw, setRegPw] = useState("");
+            const [regNickname, setRegNickname] = useState("");
+            const [authError, setAuthError] = useState("");
+            const [isRegistering, setIsRegistering] = useState(false);
+
+            // --- Blog Post / Interaction States ---
+            const [posts, setPosts] = useState(DEFAULT_POSTS);
+            const [selectedPost, setSelectedPost] = useState(null);
+            const [likedPosts, setLikedPosts] = useState([]); // Array of local liked post IDs
+            const [comments, setComments] = useState({}); // { postId: [comments] }
+            const [newComment, setNewComment] = useState("");
+
+            // --- Write Tab States ---
+            const [newPostTitle, setNewPostTitle] = useState("");
+            const [newPostContent, setNewPostContent] = useState("");
+            const [coverType, setCoverType] = useState("preset"); // 'preset' | 'url'
+            const [selectedPreset, setSelectedPreset] = useState("linear-gradient(135deg, #1e293b, #0f172a)");
+            const [customImageUrl, setCustomImageUrl] = useState("");
+
+            // --- Firebase Configuration System ---
+            const [firebaseConfigStr, setFirebaseConfigStr] = useState("");
+            const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
+            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作中)");
+            const dbRef = useRef(null);
+            const authRef = useRef(null);
+
+            // Custom Preset Colors for Article Covers
+            const presetGradients = [
+                { name: "Deep Space", value: "linear-gradient(135deg, #0f172a, #1e3a8a)" },
+                { name: "Tokyo Neon", value: "linear-gradient(135deg, #1e1b4b, #4c1d95)" },
+                { name: "Sakura Breeze", value: "linear-gradient(135deg, #fda4af, #f43f5e)" },
+                { name: "Forest Calm", value: "linear-gradient(135deg, #064e3b, #0f766e)" },
+                { name: "Sunset Horizon", value: "linear-gradient(135deg, #7c2d12, #b91c1c)" },
+                { name: "Minimal Charcoal", value: "linear-gradient(135deg, #1f2937, #111827)" }
+            ];
+
+            // Modal Trigger for non-authenticated guests
+            const [showGuestAlert, setShowGuestAlert] = useState(false);
+            const [toastMessage, setToastMessage] = useState("");
+
+            // --- Helper to show Custom elegant toasts (replaces alert) ---
+            const triggerToast = (msg) => {
+                setToastMessage(msg);
+                setTimeout(() => setToastMessage(""), 4000);
+            };
+
+            // Load custom theme, fonts, and custom Firebase credentials if stored in localStorage
+            useEffect(() => {
+                const savedTheme = localStorage.getItem("jimin_theme");
+                const savedFont = localStorage.getItem("jimin_font");
+                const savedFirebaseConfig = localStorage.getItem("jimin_firebase_config");
+                const savedUser = localStorage.getItem("jimin_user");
+
+                if (savedTheme) setTheme(savedTheme);
+                if (savedFont) setFontStyle(savedFont);
+                if (savedUser) setUser(JSON.parse(savedUser));
+                
+                if (savedFirebaseConfig) {
+                    setFirebaseConfigStr(savedFirebaseConfig);
+                    initFirebase(savedFirebaseConfig);
+                }
+            }, []);
+
+            // --- Initialize Custom Firebase Client dynamically ---
+            const initFirebase = async (configJson) => {
+                try {
+                    const cleanJson = configJson.trim();
+                    const config = JSON.parse(cleanJson);
+                    
+                    const sdk = window.FirebaseSDK;
+                    if (!sdk) throw new Error("Firebase SDK is not loaded completely.");
+
+                    const app = sdk.initializeApp(config, "JiminBlogApp_" + Date.now());
+                    const auth = sdk.getAuth(app);
+                    const db = sdk.getFirestore(app);
+
+                    // Perform silent Anonymous Sign-In to satisfy database rules safely
+                    await sdk.signInAnonymously(auth);
+
+                    dbRef.current = db;
+                    authRef.current = auth;
+                    setIsFirebaseConnected(true);
+                    setFirebaseStatusMsg("⚡ クラウドデータベース(Firestore)に正常接続されました！");
+                    localStorage.setItem("jimin_firebase_config", cleanJson);
+
+                    // Fetch Posts instantly from the configured database
+                    fetchPostsFromFirebase(db);
+                } catch (err) {
+                    console.error(err);
+                    setIsFirebaseConnected(false);
+                    setFirebaseStatusMsg("❌ 接続失敗: 設定情報のフォーマットを再確認してください。");
+                }
+            };
+
+            // Save Firebase Configuration manually
+            const handleSaveFirebaseConfig = () => {
+                if (!firebaseConfigStr) {
+                    localStorage.removeItem("jimin_firebase_config");
+                    setIsFirebaseConnected(false);
+                    dbRef.current = null;
+                    setPosts(DEFAULT_POSTS);
+                    setFirebaseStatusMsg("未接続 (デフォルトのデモDBで動作中)");
+                    triggerToast("設定が初期化されました。デモデータベースを適用します。");
+                    return;
+                }
+                initFirebase(firebaseConfigStr);
+            };
+
+            // --- Fetch Posts ---
+            const fetchPostsFromFirebase = async (dbInstance) => {
+                const db = dbInstance || dbRef.current;
+                if (!db) return;
+
+                try {
+                    const sdk = window.FirebaseSDK;
+                    const appId = "jimin-blog-app"; // fixed identifier
+                    const postsCol = sdk.collection(db, 'artifacts', appId, 'public', 'data', 'posts');
+                    const postsQuery = sdk.query(postsCol, sdk.orderBy('createdAt', 'desc'));
+                    
+                    // Setup real-time listener to automatically show updates across different devices
+                    sdk.onSnapshot(postsQuery, (snapshot) => {
+                        const fetched = [];
+                        snapshot.forEach((doc) => {
+                            fetched.push({ id: doc.id, ...doc.data() });
+                        });
+                        setPosts(fetched.length > 0 ? fetched : DEFAULT_POSTS);
+                    }, (error) => {
+                        console.error("Firestore onSnapshot error:", error);
+                        triggerToast("DB同期エラーが発生しました。");
+                    });
+                } catch (e) {
+                    console.error("Fetch posts failed: ", e);
+                }
+            };
+
+            // --- Custom User Registration & Login via Firestore Mock Layer ---
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                setAuthError("");
+
+                if (!regId || !regPw || !regNickname) {
+                    setAuthError("全ての項目を入力してください。");
+                    return;
+                }
+
+                const newUserObj = { id: regId.trim(), nickname: regNickname.trim(), isGuest: false };
+
+                // If Firebase DB is connected, store user securely in standard path
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const userDocRef = sdk.doc(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'users', regId.trim());
+                        
+                        // Check if User already exists
+                        const checkSnap = await sdk.getDoc(userDocRef);
+                        if (checkSnap.exists()) {
+                            setAuthError("既に存在するIDです。");
+                            return;
+                        }
+
+                        // Save new record
+                        await sdk.setDoc(userDocRef, {
+                            id: regId.trim(),
+                            password: regPw, // Simply stored for lightweight mock authentication
+                            nickname: regNickname.trim(),
+                            createdAt: new Date().toISOString()
+                        });
+
+                    } catch (err) {
+                        setAuthError("DB登録中にエラーが発生しました。");
+                        return;
+                    }
+                } else {
+                    // Local Storage fallback when DB is not yet connected
+                    const localUsers = JSON.parse(localStorage.getItem("local_users") || "{}");
+                    if (localUsers[regId]) {
+                        setAuthError("既に存在するIDです。");
+                        return;
+                    }
+                    localUsers[regId] = { password: regPw, nickname: regNickname };
+                    localStorage.setItem("local_users", JSON.stringify(localUsers));
+                }
+
+                setUser(newUserObj);
+                localStorage.setItem("jimin_user", JSON.stringify(newUserObj));
+                triggerToast("メンバー会員登録が完了しました！");
+                setIsRegistering(false);
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setAuthError("");
+
+                if (!loginId || !loginPw) {
+                    setAuthError("IDとパスワードを入力してください。");
+                    return;
+                }
+
+                let loggedInUser = null;
+
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const userDocRef = sdk.doc(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'users', loginId.trim());
+                        const userSnap = await sdk.getDoc(userDocRef);
+
+                        if (userSnap.exists() && userSnap.data().password === loginPw) {
+                            loggedInUser = {
+                                id: userSnap.data().id,
+                                nickname: userSnap.data().nickname,
+                                isGuest: false
+                            };
+                        } else {
+                            setAuthError("IDまたはパスワードが一致しません。");
+                            return;
+                        }
+                    } catch (err) {
+                        setAuthError("ログイン処理中にエラーが発生しました。");
+                        return;
+                    }
+                } else {
+                    // Local Storage verification fallback
+                    const localUsers = JSON.parse(localStorage.getItem("local_users") || "{}");
+                    const matchedUser = localUsers[loginId];
+                    if (matchedUser && matchedUser.password === loginPw) {
+                        loggedInUser = { id: loginId, nickname: matchedUser.nickname, isGuest: false };
+                    } else {
+                        setAuthError("IDまたはパスワードが一致しません。");
+                        return;
+                    }
+                }
+
+                setUser(loggedInUser);
+                localStorage.setItem("jimin_user", JSON.stringify(loggedInUser));
+                triggerToast(`${loggedInUser.nickname}様、お帰りなさいませ。`);
+            };
+
+            const handleGuestEntrance = () => {
+                const guestUser = { id: "guest_user", nickname: "ゲスト", isGuest: true };
+                setUser(guestUser);
+                localStorage.setItem("jimin_user", JSON.stringify(guestUser));
+                triggerToast("ゲスト権限でログインしました。");
+            };
+
+            const handleLogout = () => {
+                setUser(null);
+                localStorage.removeItem("jimin_user");
+                triggerToast("ログアウトしました。");
+            };
+
+            // --- Write and Publish Post ---
+            const handlePublishPost = async (e) => {
+                e.preventDefault();
+                if (!user || user.isGuest) {
+                    setShowGuestAlert(true);
+                    return;
+                }
+
+                if (!newPostTitle.trim() || !newPostContent.trim()) {
+                    triggerToast("タイトルと内容を入力してください。");
+                    return;
+                }
+
+                const postPayload = {
+                    title: newPostTitle,
+                    content: newPostContent,
+                    author: user.nickname,
+                    coverType: coverType,
+                    coverPreset: coverType === 'preset' ? selectedPreset : "",
+                    imageUrl: coverType === 'url' ? customImageUrl : "",
+                    likes: 0,
+                    createdAt: new Date().toISOString()
+                };
+
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const postsCol = sdk.collection(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'posts');
+                        await sdk.addDoc(postsCol, postPayload);
+                        triggerToast("ブログを投稿しました！");
+                    } catch (err) {
+                        console.error(err);
+                        triggerToast("投稿エラーが発生しました。");
+                    }
+                } else {
+                    // Direct local mock insertion
+                    const localId = "local-post-" + Date.now();
+                    const updatedPosts = [{ id: localId, ...postPayload }, ...posts];
+                    setPosts(updatedPosts);
+                    triggerToast("ローカル環境にブログを保存しました。");
+                }
+
+                // Reset forms and return to feed
+                setNewPostTitle("");
+                setNewPostContent("");
+                setCustomImageUrl("");
+                setCurrentTab("home");
+            };
+
+            // --- Likes Interaction ---
+            const handleLikePost = async (postId, e) => {
+                e.stopPropagation();
+                if (likedPosts.includes(postId)) {
+                    triggerToast("既にリアクション済みです！");
+                    return;
+                }
+
+                setLikedPosts([...likedPosts, postId]);
+
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const postDoc = sdk.doc(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'posts', postId);
+                        await sdk.updateDoc(postDoc, {
+                            likes: sdk.increment(1)
+                        });
+                    } catch (err) {
+                        console.error(err);
+                    }
+                } else {
+                    setPosts(posts.map(p => p.id === postId ? { ...p, likes: p.likes + 1 } : p));
+                    if (selectedPost && selectedPost.id === postId) {
+                        setSelectedPost({ ...selectedPost, likes: selectedPost.likes + 1 });
+                    }
+                }
+            };
+
+            // --- Fetch Comments dynamically ---
+            const fetchComments = async (postId) => {
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const commentsCol = sdk.collection(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'comments');
+                        const commentsQuery = sdk.query(commentsCol, sdk.where('postId', '==', postId));
+                        
+                        sdk.onSnapshot(commentsQuery, (snapshot) => {
+                            const postComments = [];
+                            snapshot.forEach((doc) => {
+                                postComments.push({ id: doc.id, ...doc.data() });
+                            });
+                            // Sort in client side to avoid complex index requirements
+                            postComments.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+                            setComments(prev => ({ ...prev, [postId]: postComments }));
+                        });
+                    } catch (err) {
+                        console.error(err);
+                    }
+                } else {
+                    // Fallback to local structure
+                    if (!comments[postId]) {
+                        setComments(prev => ({
+                            ...prev,
+                            [postId]: [
+                                { id: "demo-c-1", author: "Sakura", content: "とても感動する記事ですね！🌸", createdAt: new Date().toISOString() }
+                            ]
+                        }));
+                    }
+                }
+            };
+
+            const handlePostClick = (post) => {
+                setSelectedPost(post);
+                fetchComments(post.id);
+            };
+
+            // --- Write and Post a Comment ---
+            const handleAddComment = async (e) => {
+                e.preventDefault();
+                if (!user || user.isGuest) {
+                    setShowGuestAlert(true);
+                    return;
+                }
+
+                if (!newComment.trim()) return;
+
+                const commentPayload = {
+                    postId: selectedPost.id,
+                    author: user.nickname,
+                    content: newComment.trim(),
+                    createdAt: new Date().toISOString()
+                };
+
+                if (dbRef.current) {
+                    try {
+                        const sdk = window.FirebaseSDK;
+                        const commentsCol = sdk.collection(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'comments');
+                        await sdk.addDoc(commentsCol, commentPayload);
+                    } catch (err) {
+                        console.error(err);
+                    }
+                } else {
+                    // Local Append
+                    const localCommentId = "local-c-" + Date.now();
+                    const existing = comments[selectedPost.id] || [];
+                    setComments({
+                        ...comments,
+                        [selectedPost.id]: [...existing, { id: localCommentId, ...commentPayload }]
+                    });
+                }
+
+                setNewComment("");
+            };
+
+            // Changing visual theme layouts
+            const handleThemeChange = (newTheme) => {
+                setTheme(newTheme);
+                localStorage.setItem("jimin_theme", newTheme);
+            };
+
+            const handleFontChange = (newFont) => {
+                setFontStyle(newFont);
+                localStorage.setItem("jimin_font", newFont);
+            };
+
+            // --- Theme Styling Mappings ---
+            const getThemeClasses = () => {
+                switch (theme) {
+                    case "sakura":
+                        return {
+                            bg: "bg-[#FDFAF6] text-rose-900",
+                            card: "sakura-glass text-rose-950",
+                            header: "bg-rose-100/80 border-rose-200/50 text-rose-900",
+                            accent: "bg-rose-500 text-white hover:bg-rose-600",
+                            textGlow: "text-rose-600 glow-text",
+                            input: "bg-white border-rose-200 focus:ring-rose-400 text-rose-900",
+                            navActive: "border-rose-500 text-rose-600",
+                            navInactive: "text-rose-400 hover:text-rose-500 border-transparent",
+                            btnSecondary: "bg-rose-200/60 text-rose-800 hover:bg-rose-300/60"
+                        };
+                    case "forest":
+                        return {
+                            bg: "bg-[#0b160b] text-[#e2f0d9]",
+                            card: "forest-glass text-[#e2f0d9]",
+                            header: "bg-[#142314]/90 border-emerald-900/40 text-emerald-100",
+                            accent: "bg-emerald-600 text-white hover:bg-emerald-500",
+                            textGlow: "text-emerald-400 glow-text",
+                            input: "bg-[#0e1c0e] border-emerald-950 focus:ring-emerald-500 text-emerald-100",
+                            navActive: "border-emerald-500 text-emerald-400",
+                            navInactive: "text-emerald-700 hover:text-emerald-500 border-transparent",
+                            btnSecondary: "bg-emerald-950/60 text-emerald-200 hover:bg-emerald-900/60"
+                        };
+                    case "classic":
+                        return {
+                            bg: "bg-gray-50 text-gray-900",
+                            card: "white-glass text-gray-900",
+                            header: "bg-white/90 border-gray-200 text-gray-800",
+                            accent: "bg-gray-900 text-white hover:bg-gray-800",
+                            textGlow: "text-gray-900 font-bold",
+                            input: "bg-white border-gray-300 focus:ring-gray-500 text-gray-900",
+                            navActive: "border-gray-900 text-gray-900",
+                            navInactive: "text-gray-400 hover:text-gray-600 border-transparent",
+                            btnSecondary: "bg-gray-200 text-gray-800 hover:bg-gray-300"
+                        };
+                    case "deep-blue":
+                    default:
+                        return {
+                            bg: "bg-[#0B192C] text-slate-100",
+                            card: "glass-card text-slate-100",
+                            header: "bg-[#1E3E62]/90 border-blue-900/40 text-slate-100",
+                            accent: "bg-blue-600 text-white hover:bg-blue-500",
+                            textGlow: "text-blue-400 glow-text",
+                            input: "bg-[#0B192C]/80 border-slate-700 focus:ring-blue-500 text-slate-100",
+                            navActive: "border-blue-500 text-blue-400",
+                            navInactive: "text-slate-500 hover:text-slate-300 border-transparent",
+                            btnSecondary: "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                        };
+                }
+            };
+
+            const styles = getThemeClasses();
+
+            // --- ENTRANCE / LANDING SCREEN ---
+            if (!user) {
+                return (
+                    <div className={`min-h-screen ${styles.bg} ${fontStyle} flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500`}>
+                        {/* Elegant background lighting orbs */}
+                        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-700/10 rounded-full blur-[120px] pointer-events-none"></div>
+                        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-rose-600/5 rounded-full blur-[120px] pointer-events-none"></div>
+
+                        <div className="max-w-md w-full z-10">
+                            {/* Glowing main branding title */}
+                            <div className="text-center mb-10">
+                                <h1 className={`text-5xl md:text-6xl tracking-tight mb-2 select-none font-bold ${styles.textGlow}`}>
+                                    *JIMIN Blog.*
+                                </h1>
+                                <p className="text-xs tracking-widest opacity-60">静かに紡ぎ出す、特別な日常</p>
+                            </div>
+
+                            {/* Authentication and Entrance card */}
+                            <div className={`p-8 rounded-2xl ${styles.card} shadow-2xl`}>
+                                {isRegistering ? (
+                                    // --- Registration Form ---
+                                    <form onSubmit={handleRegister} className="space-y-4">
+                                        <h2 className="text-lg font-bold mb-4 text-center">新規会員登録</h2>
+                                        {authError && <div className="text-red-500 text-xs text-center">{authError}</div>}
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">希望ID</label>
+                                            <input 
+                                                type="text" 
+                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                                placeholder="사용할 아이디"
+                                                value={regId}
+                                                onChange={e => setRegId(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">パスワード</label>
+                                            <input 
+                                                type="password" 
+                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                                placeholder="비밀번호"
+                                                value={regPw}
+                                                onChange={e => setRegPw(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">ニックネーム</label>
+                                            <input 
+                                                type="text" 
+                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                                placeholder="닉네임"
+                                                value={regNickname}
+                                                onChange={e => setRegNickname(e.target.value)}
+                                            />
+                                        </div>
+                                        <button type="submit" className={`w-full py-3 rounded-lg font-bold transition duration-300 mt-2 ${styles.accent}`}>
+                                            登録を完了する
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            onClick={() => { setIsRegistering(false); setAuthError(""); }}
+                                            className="w-full text-xs text-center opacity-60 hover:opacity-100 transition mt-2 block"
+                                        >
+                                            ログイン画面に戻る
+                                        </button>
+                                    </form>
+                                ) : (
+                                    // --- Standard Login Form ---
+                                    <form onSubmit={handleLogin} className="space-y-4">
+                                        <h2 className="text-lg font-bold mb-4 text-center">ログイン</h2>
+                                        {authError && <div className="text-red-500 text-xs text-center">{authError}</div>}
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">ID</label>
+                                            <input 
+                                                type="text" 
+                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                                placeholder="아이디"
+                                                value={loginId}
+                                                onChange={e => setLoginId(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">パスワード</label>
+                                            <input 
+                                                type="password" 
+                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                                placeholder="비밀번호"
+                                                value={loginPw}
+                                                onChange={e => setLoginPw(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="flex gap-3 pt-2">
+                                            <button type="submit" className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.accent}`}>
+                                                ログイン
+                                            </button>
+                                            <button 
+                                                type="button" 
+                                                onClick={handleGuestEntrance}
+                                                className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.btnSecondary}`}
+                                            >
+                                                ゲスト入場
+                                            </button>
+                                        </div>
+                                        <div className="text-center pt-4 border-t border-slate-700/40">
+                                            <span className="text-xs opacity-60">初めてお越しですか？</span>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => { setIsRegistering(true); setAuthError(""); }}
+                                                className="text-xs font-bold text-blue-400 hover:underline ml-1"
+                                            >
+                                                会員登録はこちら
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // --- MAIN APPLICATION SCREEN ---
+            return (
+                <div className={`min-h-screen ${styles.bg} ${fontStyle} pb-12 transition-colors duration-500`}>
+                    
+                    {/* Floating Toast Notification System */}
+                    {toastMessage && (
+                        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900 border border-slate-700/80 text-blue-400 px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-bounce">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                            <span className="text-sm font-medium">{toastMessage}</span>
+                        </div>
+                    )}
+
+                    {/* --- FIXED HEADER SECTION --- */}
+                    <header className={`sticky top-0 z-40 backdrop-blur-md border-b ${styles.header} transition-all`}>
+                        <div className="max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+                            <div className="flex flex-col">
+                                <h1 className={`text-2xl font-bold cursor-pointer ${styles.textGlow}`} onClick={() => setCurrentTab("home")}>
+                                    *JIMIN Blog.*
+                                </h1>
+                                <span className="text-[10px] tracking-widest opacity-50">Japanese Premium Diary</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-4">
+                                <span className="text-xs font-medium opacity-80 bg-slate-800/40 px-2.5 py-1 rounded-full border border-slate-700/30">
+                                    👤 {user.nickname}
+                                </span>
+                                <button 
+                                    onClick={handleLogout}
+                                    className="text-xs opacity-60 hover:opacity-100 hover:text-rose-500 transition-colors"
+                                >
+                                    ログアウト
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* --- MENU BAR TAB SYSTEM --- */}
+                        <div className="max-w-2xl mx-auto px-4 flex justify-around">
+                            <button 
+                                onClick={() => setCurrentTab("home")}
+                                className={`flex-1 py-3 text-center text-sm font-bold border-b-2 transition-all ${currentTab === "home" ? styles.navActive : styles.navInactive}`}
+                            >
+                                <i className="fa-solid fa-house mr-2"></i>ホーム
+                            </button>
+                            <button 
+                                onClick={() => {
+                                    if (user.isGuest) {
+                                        setShowGuestAlert(true);
+                                    } else {
+                                        setCurrentTab("write");
+                                    }
+                                }}
+                                className={`flex-1 py-3 text-center text-sm font-bold border-b-2 transition-all ${currentTab === "write" ? styles.navActive : styles.navInactive}`}
+                            >
+                                <i className="fa-solid fa-pen-nib mr-2"></i>投稿
+                            </button>
+                            <button 
+                                onClick={() => setCurrentTab("custom")}
+                                className={`flex-1 py-3 text-center text-sm font-bold border-b-2 transition-all ${currentTab === "custom" ? styles.navActive : styles.navInactive}`}
+                            >
+                                <i className="fa-solid fa-wand-magic-sparkles mr-2"></i>設定
+                            </button>
+                        </div>
+                    </header>
+
+                    {/* --- MAIN PAGE CONTENT WRAPPER --- */}
+                    <main className="max-w-xl mx-auto px-4 mt-6">
+
+                        {}
+                        {/* --- TAB 3: CUSTOMIZATION AND DB MANAGEMENT --- */}
+                        {currentTab === "custom" && (
+                            <div className="space-y-6">
+                                <div className={`p-6 rounded-2xl ${styles.card}`}>
+                                    <h2 className="text-lg font-bold mb-4 border-b border-slate-700/30 pb-2 flex items-center gap-2">
+                                        <i className="fa-solid fa-palette text-blue-400"></i> デザインテーマ選択
+                                    </h2>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button 
+                                            onClick={() => handleThemeChange("deep-blue")}
+                                            className={`p-4 rounded-xl border text-left transition ${theme === "deep-blue" ? "border-blue-500 bg-blue-950/40" : "border-slate-800 bg-slate-900/10 hover:border-slate-700"}`}
+                                        >
+                                            <div className="w-5 h-5 rounded-full bg-[#0B192C] border mb-2"></div>
+                                            <span className="text-xs font-bold block">Deep Blue</span>
+                                            <span className="text-[10px] opacity-60">深淵なる夜空のネイビー</span>
+                                        </button>
+
+                                        <button 
+                                            onClick={() => handleThemeChange("sakura")}
+                                            className={`p-4 rounded-xl border text-left transition ${theme === "sakura" ? "border-rose-400 bg-rose-50" : "border-slate-300 text-rose-950 hover:border-rose-400"}`}
+                                        >
+                                            <div className="w-5 h-5 rounded-full bg-rose-300 border mb-2"></div>
+                                            <span className="text-xs font-bold block">Sakura Pink</span>
+                                            <span className="text-[10px] opacity-60">桜花爛漫パステルピンク</span>
+                                        </button>
+
+                                        <button 
+                                            onClick={() => handleThemeChange("forest")}
+                                            className={`p-4 rounded-xl border text-left transition ${theme === "forest" ? "border-emerald-500 bg-emerald-950/30" : "border-slate-800 bg-slate-900/10 hover:border-slate-700"}`}
+                                        >
+                                            <div className="w-5 h-5 rounded-full bg-[#0b160b] border mb-2"></div>
+                                            <span className="text-xs font-bold block">Forest Green</span>
+                                            <span className="text-[10px] opacity-60">自然の息吹、安らぎの緑</span>
+                                        </button>
+
+                                        <button 
+                                            onClick={() => handleThemeChange("classic")}
+                                            className={`p-4 rounded-xl border text-left transition ${theme === "classic" ? "border-gray-900 bg-gray-100 text-gray-900" : "border-slate-300 text-gray-800 hover:border-gray-400"}`}
+                                        >
+                                            <div className="w-5 h-5 rounded-full bg-white border mb-2"></div>
+                                            <span className="text-xs font-bold block">Classic White</span>
+                                            <span className="text-[10px] opacity-60">澄み切ったミニマルホワイト</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className={`p-6 rounded-2xl ${styles.card}`}>
+                                    <h2 className="text-lg font-bold mb-4 border-b border-slate-700/30 pb-2 flex items-center gap-2">
+                                        <i className="fa-solid fa-font text-blue-400"></i> フォント変更
+                                    </h2>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => handleFontChange("font-gothic")}
+                                            className={`flex-1 py-2 rounded-lg border text-xs font-bold transition ${fontStyle === "font-gothic" ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                        >
+                                            ゴシック体
+                                        </button>
+                                        <button 
+                                            onClick={() => handleFontChange("font-mincho")}
+                                            className={`flex-1 py-2 rounded-lg border text-xs font-bold transition ${fontStyle === "font-mincho" ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                        >
+                                            明朝体
+                                        </button>
+                                        <button 
+                                            onClick={() => handleFontChange("font-rounded")}
+                                            className={`flex-1 py-2 rounded-lg border text-xs font-bold transition ${fontStyle === "font-rounded" ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                        >
+                                            丸ゴシック
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Cloud DB Connection Configurator */}
+                                <div className={`p-6 rounded-2xl border-2 border-dashed border-blue-500/30 ${styles.card}`}>
+                                    <h2 className="text-lg font-bold mb-2 flex items-center gap-2 text-blue-400">
+                                        <i className="fa-solid fa-database"></i> Firebase クラウド連携
+                                    </h2>
+                                    <p className="text-xs opacity-70 mb-4 leading-relaxed">
+                                        Vercel等へデプロイした後、データを永久保存して別デバイスでもリアルタイム共有可能にしたい場合は、ご自身のFirebase構成（JSON）を以下に貼り付けて適用してください。
+                                    </p>
+                                    <div className="space-y-3">
+                                        <textarea 
+                                            className="w-full h-32 px-4 py-2 text-xs font-mono rounded-lg border bg-slate-950/60 focus:outline-none focus:ring-1 focus:ring-blue-500 border-slate-800 text-slate-100"
+                                            placeholder={`{\n  "apiKey": "AIzaSy...",\n  "authDomain": "...firebaseapp.com",\n  "projectId": "...",\n  "storageBucket": "...",\n  "messagingSenderId": "...",\n  "appId": "..."\n}`}
+                                            value={firebaseConfigStr}
+                                            onChange={e => setFirebaseConfigStr(e.target.value)}
+                                        />
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-semibold text-blue-400">
+                                                ステータス: {firebaseStatusMsg}
+                                            </span>
+                                            <button 
+                                                onClick={handleSaveFirebaseConfig}
+                                                className={`px-4 py-2 rounded-lg text-xs font-bold ${styles.accent}`}
+                                            >
+                                                設定を保存
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {}
+                        {/* --- TAB 1: HOME FEED (INSTAGRAM STYLE) --- */}
+                        {currentTab === "home" && (
+                            <div className="space-y-6">
+                                {posts.length === 0 ? (
+                                    <div className="text-center py-20 opacity-60">
+                                        <i className="fa-solid fa-notes-medical text-4xl mb-4 text-blue-500"></i>
+                                        <p className="text-sm">最初の投稿を待ちわびています...</p>
+                                    </div>
+                                ) : (
+                                    posts.map(post => {
+                                        const isLiked = likedPosts.includes(post.id);
+                                        return (
+                                            <article 
+                                                key={post.id}
+                                                onClick={() => handlePostClick(post)}
+                                                className={`rounded-2xl overflow-hidden shadow-lg cursor-pointer transition-all duration-300 hover:scale-[1.01] hover:shadow-2xl ${styles.card}`}
+                                            >
+                                                {/* Header */}
+                                                <div className="p-4 flex items-center justify-between border-b border-slate-700/20">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-rose-400 to-blue-500 flex items-center justify-center font-bold text-white shadow-inner uppercase">
+                                                            {post.author.slice(0, 2)}
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-bold">{post.author}</p>
+                                                            <p className="text-[10px] opacity-50">{new Date(post.createdAt).toLocaleDateString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</p>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-xs opacity-40">Detail</span>
+                                                </div>
+
+                                                {/* Cover Area */}
+                                                <div 
+                                                    className="aspect-[4/3] flex flex-col justify-end p-6 relative overflow-hidden"
+                                                    style={{ 
+                                                        background: post.coverType === 'preset' ? post.coverPreset : `url(${post.imageUrl})`,
+                                                        backgroundSize: 'cover',
+                                                        backgroundPosition: 'center'
+                                                    }}
+                                                >
+                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent"></div>
+                                                    <h3 className="text-xl md:text-2xl font-bold text-white z-10 drop-shadow">
+                                                        {post.title}
+                                                    </h3>
+                                                </div>
+
+                                                {/* Interaction Row */}
+                                                <div className="p-4 flex items-center justify-between border-t border-slate-700/10">
+                                                    <div className="flex items-center gap-4">
+                                                        <button 
+                                                            onClick={(e) => handleLikePost(post.id, e)}
+                                                            className={`flex items-center gap-1.5 text-sm transition ${isLiked ? "text-rose-500 scale-110 font-bold" : "hover:text-rose-400"}`}
+                                                        >
+                                                            <i className={`${isLiked ? "fa-solid" : "fa-regular"} fa-heart`}></i>
+                                                            <span>{post.likes}</span>
+                                                        </button>
+                                                        <span className="flex items-center gap-1.5 text-sm opacity-60">
+                                                            <i className="fa-regular fa-comment"></i>
+                                                            <span>{comments[post.id]?.length || 0}</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-xs opacity-60 hover:underline">
+                                                        読む <i className="fa-solid fa-chevron-right text-[10px]"></i>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
+
+                        {}
+                        {/* --- TAB 2: WRITE COMPONENT --- */}
+                        {currentTab === "write" && (
+                            <div className={`p-6 rounded-2xl ${styles.card} shadow-2xl`}>
+                                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                                    <i className="fa-solid fa-feather text-blue-400"></i> 新しい感情、特別な瞬間
+                                </h2>
+                                <form onSubmit={handlePublishPost} className="space-y-5">
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider mb-1.5 opacity-80">タイトル</label>
+                                        <input 
+                                            type="text" 
+                                            className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 ${styles.input}`}
+                                            placeholder="タイトルを入力してください..."
+                                            value={newPostTitle}
+                                            onChange={e => setNewPostTitle(e.target.value)}
+                                        />
+                                    </div>
+
+                                    {/* Cover Image Settings */}
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider mb-2 opacity-80">カバー画像設定</label>
+                                        <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <button 
+                                                type="button"
+                                                onClick={() => setCoverType("preset")}
+                                                className={`py-2 rounded-lg text-xs font-bold border transition ${coverType === 'preset' ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                            >
+                                                グラデーション
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => setCoverType("url")}
+                                                className={`py-2 rounded-lg text-xs font-bold border transition ${coverType === 'url' ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                            >
+                                                画像URLリンク
+                                            </button>
+                                        </div>
+
+                                        {coverType === "preset" ? (
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {presetGradients.map((p, idx) => (
+                                                    <button 
+                                                        key={idx}
+                                                        type="button"
+                                                        onClick={() => setSelectedPreset(p.value)}
+                                                        className={`h-12 rounded-lg border-2 relative transition ${selectedPreset === p.value ? "border-blue-400 scale-[1.04]" : "border-transparent"}`}
+                                                        style={{ background: p.value }}
+                                                    >
+                                                        <span className="absolute inset-0 flex items-center justify-center text-[9px] text-white font-bold bg-black/20 rounded-md">
+                                                            {p.name}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <input 
+                                                type="text"
+                                                className={`w-full px-4 py-2.5 rounded-xl border text-xs focus:outline-none ${styles.input}`}
+                                                placeholder="https://images.unsplash.com/... (경로입력)"
+                                                value={customImageUrl}
+                                                onChange={e => setCustomImageUrl(e.target.value)}
+                                            />
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider mb-1.5 opacity-80">本文</label>
+                                        <textarea 
+                                            rows="6"
+                                            className={`w-full px-4 py-3 rounded-xl border focus:outline-none focus:ring-2 ${styles.input}`}
+                                            placeholder="今日の出来事や感情を静かに書き残してください..."
+                                            value={newPostContent}
+                                            onChange={e => setNewPostContent(e.target.value)}
+                                        />
+                                    </div>
+
+                                    <button type="submit" className={`w-full py-4 rounded-xl font-bold shadow-lg transition-all ${styles.accent}`}>
+                                        投稿して共有する
+                                    </button>
+                                </form>
+                            </div>
+                        )}
+                    </main>
+
+                    {}
+                    {/* --- POST DETAIL MODAL / INSTAGRAM OVERLAY STYLE --- */}
+                    {selectedPost && (
+                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                            <div className={`w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl relative flex flex-col max-h-[85vh] ${styles.card}`}>
+                                
+                                {/* Image / Cover */}
+                                <div 
+                                    className="h-48 md:h-56 relative flex items-end p-6"
+                                    style={{ 
+                                        background: selectedPost.coverType === 'preset' ? selectedPost.coverPreset : `url(${selectedPost.imageUrl})`,
+                                        backgroundSize: 'cover',
+                                        backgroundPosition: 'center'
+                                    }}
+                                >
+                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 to-transparent"></div>
+                                    <button 
+                                        onClick={() => setSelectedPost(null)}
+                                        className="absolute top-4 right-4 bg-black/40 hover:bg-black/60 text-white w-8 h-8 rounded-full flex items-center justify-center transition"
+                                    >
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                    <h2 className="text-xl md:text-2xl font-bold text-white z-10 drop-shadow">
+                                        {selectedPost.title}
+                                    </h2>
+                                </div>
+
+                                {/* Main Scrollable Body Section */}
+                                <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                                    <div className="flex items-center justify-between border-b border-slate-700/20 pb-3">
+                                        <span className="text-xs font-bold text-blue-400">✏️ {selectedPost.author}</span>
+                                        <span className="text-[10px] opacity-50">
+                                            {new Date(selectedPost.createdAt).toLocaleString('ja-JP')}
+                                        </span>
+                                    </div>
+                                    
+                                    <p className="text-sm leading-relaxed whitespace-pre-wrap opacity-90 font-medium">
+                                        {selectedPost.content}
+                                    </p>
+
+                                    {/* Comments Section */}
+                                    <div className="border-t border-slate-700/20 pt-4">
+                                        <h4 className="text-xs font-bold uppercase tracking-wider mb-3 opacity-60">コメント</h4>
+                                        
+                                        <div className="space-y-3 max-h-48 overflow-y-auto mb-4 pr-1">
+                                            {(!comments[selectedPost.id] || comments[selectedPost.id].length === 0) ? (
+                                                <p className="text-[11px] opacity-40 italic text-center py-2">コメントがありません。最初の会話をはじめましょう。</p>
+                                            ) : (
+                                                comments[selectedPost.id].map(comment => (
+                                                    <div key={comment.id} className="bg-slate-800/20 rounded-xl p-3 border border-slate-700/10">
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <span className="text-xs font-bold text-blue-400">{comment.author}</span>
+                                                            <span className="text-[9px] opacity-40">{new Date(comment.createdAt).toLocaleDateString()}</span>
+                                                        </div>
+                                                        <p className="text-xs opacity-90">{comment.content}</p>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+
+                                        {/* Write Comment Form */}
+                                        <form onSubmit={handleAddComment} className="flex gap-2">
+                                            <input 
+                                                type="text" 
+                                                className={`flex-1 px-4 py-2 rounded-xl border text-xs focus:outline-none ${styles.input}`}
+                                                placeholder="コメントを入力..."
+                                                value={newComment}
+                                                onChange={e => setNewComment(e.target.value)}
+                                            />
+                                            <button type="submit" className={`px-4 py-2 rounded-xl text-xs font-bold ${styles.accent}`}>
+                                                投稿
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {/* --- GUEST ALERT MODAL DIALOG --- */}
+                    {showGuestAlert && (
+                        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div className="max-w-sm w-full bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-2xl text-center space-y-4">
+                                <div className="w-12 h-12 rounded-full bg-blue-950 text-blue-400 flex items-center justify-center mx-auto text-xl">
+                                    <i className="fa-solid fa-circle-exclamation"></i>
+                                </div>
+                                <div>
+                                    <h3 className="text-md font-bold">メンバー登録が必要です</h3>
+                                    <p className="text-xs opacity-60 mt-1 leading-relaxed">
+                                        ゲスト会員はタイムラインの閲覧のみ可能です。ブログ投稿およびコメント機能を使用するには、ログアウトして会員登録を行ってください。
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button 
+                                        onClick={() => setShowGuestAlert(false)}
+                                        className={`flex-1 py-2.5 rounded-lg text-xs font-bold ${styles.btnSecondary}`}
+                                    >
+                                        キャンセル
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            setShowGuestAlert(false);
+                                            handleLogout();
+                                        }}
+                                        className={`flex-1 py-2.5 rounded-lg text-xs font-bold ${styles.accent}`}
+                                    >
+                                        ログインへ移動
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        // Render standard SPA inside target DOM
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
