@@ -108,7 +108,7 @@
             {
                 id: "demo-post-2",
                 title: "雨の日のカフェ巡り ☕",
-                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨의 소리를 들으며 마시는 따뜻한 블렌드 커피는 각별했습니다. 여러분도 좋은 하루 보내세요.",
+                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨の音を聴きながら飲む温かいブレンドコーヒーは格別でした。皆様も良い一日をお過ごしください。",
                 author: "管理者",
                 coverType: "preset",
                 coverPreset: "linear-gradient(135deg, #0f172a, #1e293b)",
@@ -150,7 +150,7 @@
             // --- Firebase Configuration System ---
             const [firebaseConfigStr, setFirebaseConfigStr] = useState("");
             const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作중)");
+            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作中)");
             const dbRef = useRef(null);
             const authRef = useRef(null);
 
@@ -187,51 +187,90 @@
                 
                 if (savedFirebaseConfig) {
                     setFirebaseConfigStr(savedFirebaseConfig);
-                    initFirebase(savedFirebaseConfig);
+                    // Wait until external module loads FirebaseSDK completely
+                    const interval = setInterval(() => {
+                        if (window.FirebaseSDK) {
+                            clearInterval(interval);
+                            initFirebase(savedFirebaseConfig);
+                        }
+                    }, 100);
+                    return () => clearInterval(interval);
                 }
             }, []);
+
+            // Robust and lenient JavaScript object parser
+            const parseLenientJson = (str) => {
+                if (!str) return null;
+                let clean = str.trim();
+                
+                // Strip variables assignment if copied directly as code snippet (const config = { ... })
+                clean = clean.replace(/^(const|let|var|window\.)?\s*\w+\s*=\s*/, '');
+                if (clean.endsWith(';')) {
+                    clean = clean.slice(0, -1);
+                }
+                
+                try {
+                    // Safe evaluation of JS Object literals (handles unquoted keys, single quotes, trailing commas)
+                    const parserFn = new Function(`return (${clean});`);
+                    return parserFn();
+                } catch (e) {
+                    // Fallback to strict standard JSON
+                    return JSON.parse(clean);
+                }
+            };
 
             // --- Initialize Custom Firebase Client dynamically (Auto-correcting Parser) ---
             const initFirebase = async (configJson) => {
                 try {
-                    let clean = configJson.trim();
-                    
-                    // [방탄 교정 로직 1] JS 변수 할당문 (const firebaseConfig = ...) 전체 자동 제거
-                    clean = clean.replace(/^(const|let|var|window\.)?\s*\w+\s*=\s*/, '');
-                    if (clean.endsWith(';')) {
-                        clean = clean.slice(0, -1);
+                    const config = parseLenientJson(configJson);
+                    if (!config || !config.apiKey || !config.projectId) {
+                        throw new Error("フォーマットが正しくありません。apiKey や projectId などの必須キーを確認してください。");
                     }
-                    
-                    // [방탄 교정 로직 2] 큰따옴표 없는 키값(apiKey 등)에 전부 완벽하게 큰따옴표 보완 적용
-                    clean = clean.replace(/([{,]\s*)([a-zA-Z0-9_]+)(\s* :|\s*:)/g, '$1"$2"$3');
-                    
-                    // [방탄 교정 로직 3] 끝부분에 지저분하게 꼬인 콤마(,) 흔적 자동 청소 및 규격 복구
-                    clean = clean.replace(/,\s*([\]}])/g, '$1');
 
-                    const config = JSON.parse(clean);
-                    
                     const sdk = window.FirebaseSDK;
-                    if (!sdk) throw new Error("Firebase SDK is not loaded completely.");
+                    if (!sdk) throw new Error("Firebase SDKを読み込み中です。数秒後にやり直してください。");
 
+                    // Initialize custom app instance safely
                     const app = sdk.initializeApp(config, "JiminBlogApp_" + Date.now());
                     const auth = sdk.getAuth(app);
                     const db = sdk.getFirestore(app);
 
-                    // Perform silent Anonymous Sign-In to satisfy database rules safely
-                    await sdk.signInAnonymously(auth);
+                    // Silence Anonymous Auth failures (in case auth option is disabled in Firebase console)
+                    try {
+                        await sdk.signInAnonymously(auth);
+                    } catch (authErr) {
+                        console.warn("Anonymous auth failed, attempting to read Firestore without authentication:", authErr);
+                    }
+
+                    // Pre-verification database call to explicitly identify misconfigured Rules / DB status
+                    const testColRef = sdk.collection(db, 'artifacts', 'jimin-blog-app', 'public', 'data', 'posts');
+                    const testQuery = sdk.query(testColRef, sdk.orderBy('createdAt', 'desc'));
+                    
+                    try {
+                        await sdk.getDocs(testQuery);
+                    } catch (dbErr) {
+                        if (dbErr.code === "permission-denied" || dbErr.message.includes("permission-denied")) {
+                            throw new Error("Firestoreセキュリティルールによりアクセスが拒否されました。Firebase ConsoleのRulesタブが「allow read, write: if true;」になっているか確認してください。");
+                        } else if (dbErr.message.includes("database") || dbErr.code === "not-found") {
+                            throw new Error("Firestore Databaseが作成されていません。Firebase Consoleのビル드メニューでデータベースを作成してください。");
+                        } else {
+                            throw dbErr;
+                        }
+                    }
 
                     dbRef.current = db;
                     authRef.current = auth;
                     setIsFirebaseConnected(true);
                     setFirebaseStatusMsg("⚡ クラウドデータベース(Firestore)に正常接続されました！");
-                    localStorage.setItem("jimin_firebase_config", clean);
+                    localStorage.setItem("jimin_firebase_config", JSON.stringify(config));
 
                     // Fetch Posts instantly from the configured database
                     fetchPostsFromFirebase(db);
                 } catch (err) {
                     console.error("Firebase Init Error Details:", err);
                     setIsFirebaseConnected(false);
-                    setFirebaseStatusMsg("❌ 接続失敗: 設定情報のフォーマットを再確認してください。");
+                    // Display the explicit detailed error instead of a generic message
+                    setFirebaseStatusMsg(`❌ 接続失敗: ${err.message || err}`);
                 }
             };
 
@@ -641,7 +680,7 @@
                                             <input 
                                                 type="text" 
                                                 className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="사용할 아이디"
+                                                placeholder="希望のIDを入力してください"
                                                 value={regId}
                                                 onChange={e => setRegId(e.target.value)}
                                             />
@@ -651,7 +690,7 @@
                                             <input 
                                                 type="password" 
                                                 className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="비밀번호"
+                                                placeholder="パスワードを入力してください"
                                                 value={regPw}
                                                 onChange={e => setRegPw(e.target.value)}
                                             />
@@ -661,7 +700,7 @@
                                             <input 
                                                 type="text" 
                                                 className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="닉네임"
+                                                placeholder="表示名（ニックネーム）"
                                                 value={regNickname}
                                                 onChange={e => setRegNickname(e.target.value)}
                                             />
@@ -687,7 +726,7 @@
                                             <input 
                                                 type="text" 
                                                 className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="아이디"
+                                                placeholder="IDを入力してください"
                                                 value={loginId}
                                                 onChange={e => setLoginId(e.target.value)}
                                             />
@@ -697,7 +736,7 @@
                                             <input 
                                                 type="password" 
                                                 className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="비밀번호"
+                                                placeholder="パスワードを入力してください"
                                                 value={loginPw}
                                                 onChange={e => setLoginPw(e.target.value)}
                                             />
@@ -799,7 +838,6 @@
                     {/* --- MAIN PAGE CONTENT WRAPPER --- */}
                     <main className="max-w-xl mx-auto px-4 mt-6">
 
-                        {}
                         {/* --- TAB 3: CUSTOMIZATION AND DB MANAGEMENT --- */}
                         {currentTab === "custom" && (
                             <div className="space-y-6">
@@ -887,23 +925,22 @@
                                             value={firebaseConfigStr}
                                             onChange={e => setFirebaseConfigStr(e.target.value)}
                                         />
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-xs font-semibold text-blue-400">
-                                                ステータス: {firebaseStatusMsg}
-                                            </span>
+                                        <div className="flex flex-col gap-2">
                                             <button 
                                                 onClick={handleSaveFirebaseConfig}
-                                                className={`px-4 py-2 rounded-lg text-xs font-bold ${styles.accent}`}
+                                                className={`w-full py-2.5 rounded-lg text-xs font-bold ${styles.accent}`}
                                             >
                                                 設定を保存
                                             </button>
+                                            <div className="text-xs font-semibold p-2.5 rounded-lg bg-black/20 border border-slate-800">
+                                                ステータス: {firebaseStatusMsg}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         )}
 
-                        {}
                         {/* --- TAB 1: HOME FEED (INSTAGRAM STYLE) --- */}
                         {currentTab === "home" && (
                             <div className="space-y-6">
@@ -976,7 +1013,6 @@
                             </div>
                         )}
 
-                        {}
                         {/* --- TAB 2: WRITE COMPONENT --- */}
                         {currentTab === "write" && (
                             <div className={`p-6 rounded-2xl ${styles.card} shadow-2xl`}>
@@ -1035,7 +1071,7 @@
                                             <input 
                                                 type="text"
                                                 className={`w-full px-4 py-2.5 rounded-xl border text-xs focus:outline-none ${styles.input}`}
-                                                placeholder="https://images.unsplash.com/... (경로입력)"
+                                                placeholder="https://images.unsplash.com/... (画像リンクを入力)"
                                                 value={customImageUrl}
                                                 onChange={e => setCustomImageUrl(e.target.value)}
                                             />
@@ -1061,7 +1097,6 @@
                         )}
                     </main>
 
-                    {}
                     {/* --- POST DETAIL MODAL / INSTAGRAM OVERLAY STYLE --- */}
                     {selectedPost && (
                         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1140,7 +1175,6 @@
                         </div>
                     )}
 
-                    {}
                     {/* --- GUEST ALERT MODAL DIALOG --- */}
                     {showGuestAlert && (
                         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
