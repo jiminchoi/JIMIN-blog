@@ -175,77 +175,28 @@
             };
 
             // Load custom theme, fonts, and custom Firebase credentials if stored in localStorage
-            const REAL_FIREBASE_CONFIG = {
-                apiKey: "AIzaSyCZuTMTQG3zq0xZctPBP9QC3MvfG14ZE4o",
-                authDomain: "blogjimin-20050.firebaseapp.com",
-                projectId: "blogjimin-20050",
-                storageBucket: "blogjimin-20050.firebasestorage.app",
-                messagingSenderId: "810707923301",
-                appId: "1:810707923301:web:fce56997ff06b02d84718c"
-            };
-
-            const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("データベース接続中...");
-            const dbRef = useRef(null);
-            const authRef = useRef(null);
-
-            // 페이지가 열리자마자 제3자 컴퓨터에서도 무조건 지민님 DB로 자동 연결을 시작합니다.
             useEffect(() => {
                 const savedTheme = localStorage.getItem("jimin_theme");
                 const savedFont = localStorage.getItem("jimin_font");
+                const savedFirebaseConfig = localStorage.getItem("jimin_firebase_config");
                 const savedUser = localStorage.getItem("jimin_user");
 
                 if (savedTheme) setTheme(savedTheme);
                 if (savedFont) setFontStyle(savedFont);
                 if (savedUser) setUser(JSON.parse(savedUser));
                 
-                // Firebase SDK가 브라우저에 로드되면 즉시 연동을 시작하도록 대기합니다.
-                const interval = setInterval(() => {
-                    if (window.FirebaseSDK) {
-                        clearInterval(interval);
-                        initFirebaseWithConfig();
-                    }
-                }, 100);
-                return () => clearInterval(interval);
-            }, []);
-
-            // 진짜 데이터베이스 서버로 접속하는 핵심 함수
-            const initFirebaseWithConfig = async () => {
-                try {
-                    const sdk = window.FirebaseSDK;
-                    if (!sdk) throw new Error("Firebase SDKを読み込み中です。");
-
-                    // 1. 고정해 둔 REAL_FIREBASE_CONFIG로 접속 시작
-                    const app = sdk.initializeApp(REAL_FIREBASE_CONFIG, "JiminBlogApp_Real");
-                    const auth = sdk.getAuth(app);
-                    const db = sdk.getFirestore(app);
-
-                    // 2. 익명 로그인 시도 (제3자 글쓰기 및 조회 허용 목적)
-                    try {
-                        await sdk.signInAnonymously(auth);
-                    } catch (authErr) {
-                        console.warn("Anonymous auth failed:", authErr);
-                    }
-
-                    // 3. 테스트 호출을 통한 권한/접속 상태 체크
-                    const testColRef = sdk.collection(db, 'artifacts', 'jimin-blog-app', 'public', 'data', 'posts');
-                    const testQuery = sdk.query(testColRef, sdk.orderBy('createdAt', 'desc'));
-                    await sdk.getDocs(testQuery);
-
-                    // 4. 전역 연결 정보에 저장
-                    dbRef.current = db;
-                    authRef.current = auth;
-                    setIsFirebaseConnected(true);
-                    setFirebaseStatusMsg("⚡ クラウドデータベースに接続完了！");
-
-                    // 실시간 데이터 수신 리스너 켜기
-                    fetchPostsFromFirebase(db);
-                } catch (err) {
-                    console.error("Firebase Init Error:", err);
-                    setIsFirebaseConnected(false);
-                    setFirebaseStatusMsg(`❌ 接続失敗: ${err.message || err}`);
+                if (savedFirebaseConfig) {
+                    setFirebaseConfigStr(savedFirebaseConfig);
+                    // Wait until external module loads FirebaseSDK completely
+                    const interval = setInterval(() => {
+                        if (window.FirebaseSDK) {
+                            clearInterval(interval);
+                            initFirebase(savedFirebaseConfig);
+                        }
+                    }, 100);
+                    return () => clearInterval(interval);
                 }
-            };
+            }, []);
 
             // Robust and lenient JavaScript object parser
             const parseLenientJson = (str) => {
