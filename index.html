@@ -108,7 +108,7 @@
             {
                 id: "demo-post-2",
                 title: "雨の日のカフェ巡り ☕",
-                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨の音を聴きながら飲む暖かいブレンドコーヒーは格別でした。皆様も良い一日を。",
+                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨의 소리를 들으며 마시는 따뜻한 블렌드 커피는 각별했습니다. 여러분도 좋은 하루 보내세요.",
                 author: "管理者",
                 coverType: "preset",
                 coverPreset: "linear-gradient(135deg, #0f172a, #1e293b)",
@@ -150,7 +150,7 @@
             // --- Firebase Configuration System ---
             const [firebaseConfigStr, setFirebaseConfigStr] = useState("");
             const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作中)");
+            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作중)");
             const dbRef = useRef(null);
             const authRef = useRef(null);
 
@@ -191,11 +191,24 @@
                 }
             }, []);
 
-            // --- Initialize Custom Firebase Client dynamically ---
+            // --- Initialize Custom Firebase Client dynamically (Auto-correcting Parser) ---
             const initFirebase = async (configJson) => {
                 try {
-                    const cleanJson = configJson.trim();
-                    const config = JSON.parse(cleanJson);
+                    let clean = configJson.trim();
+                    
+                    // [방탄 교정 로직 1] JS 변수 할당문 (const firebaseConfig = ...) 전체 자동 제거
+                    clean = clean.replace(/^(const|let|var|window\.)?\s*\w+\s*=\s*/, '');
+                    if (clean.endsWith(';')) {
+                        clean = clean.slice(0, -1);
+                    }
+                    
+                    // [방탄 교정 로직 2] 큰따옴표 없는 키값(apiKey 등)에 전부 완벽하게 큰따옴표 보완 적용
+                    clean = clean.replace(/([{,]\s*)([a-zA-Z0-9_]+)(\s* :|\s*:)/g, '$1"$2"$3');
+                    
+                    // [방탄 교정 로직 3] 끝부분에 지저분하게 꼬인 콤마(,) 흔적 자동 청소 및 규격 복구
+                    clean = clean.replace(/,\s*([\]}])/g, '$1');
+
+                    const config = JSON.parse(clean);
                     
                     const sdk = window.FirebaseSDK;
                     if (!sdk) throw new Error("Firebase SDK is not loaded completely.");
@@ -211,12 +224,12 @@
                     authRef.current = auth;
                     setIsFirebaseConnected(true);
                     setFirebaseStatusMsg("⚡ クラウドデータベース(Firestore)に正常接続されました！");
-                    localStorage.setItem("jimin_firebase_config", cleanJson);
+                    localStorage.setItem("jimin_firebase_config", clean);
 
                     // Fetch Posts instantly from the configured database
                     fetchPostsFromFirebase(db);
                 } catch (err) {
-                    console.error(err);
+                    console.error("Firebase Init Error Details:", err);
                     setIsFirebaseConnected(false);
                     setFirebaseStatusMsg("❌ 接続失敗: 設定情報のフォーマットを再確認してください。");
                 }
