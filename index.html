@@ -92,6 +92,31 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // Default Fallback Database to ensure immediate display if Firebase is not configured yet
+        const DEFAULT_POSTS = [
+            {
+                id: "demo-post-1",
+                title: "新しい始まり、新しい風 🌸",
+                content: "今日から新しい挑戦が始まります。期待と緊張が半分ずつですが、一歩一歩進んでいきたいと思います。応援よろしくお願いします！",
+                author: "Jimin",
+                coverType: "preset",
+                coverPreset: "linear-gradient(135deg, #1e3a8a, #3b82f6)",
+                likes: 12,
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: "demo-post-2",
+                title: "雨の日のカフェ巡り ☕",
+                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨の音を聴きながら飲む温かいブレンドコーヒーは格別でした。皆様も良い一日をお過ごしください。",
+                author: "管理者",
+                coverType: "preset",
+                coverPreset: "linear-gradient(135deg, #0f172a, #1e293b)",
+                likes: 8,
+                createdAt: new Date(Date.now() - 86400000).toISOString()
+            }
+        ];
+
         function App() {
             // --- UI & Customization States ---
             const [currentTab, setCurrentTab] = useState("home"); // 'home' | 'write' | 'custom'
@@ -109,6 +134,7 @@
             const [isRegistering, setIsRegistering] = useState(false);
 
             // --- Blog Post / Interaction States ---
+            const [posts, setPosts] = useState(DEFAULT_POSTS);
             const [selectedPost, setSelectedPost] = useState(null);
             const [likedPosts, setLikedPosts] = useState([]); // Array of local liked post IDs
             const [comments, setComments] = useState({}); // { postId: [comments] }
@@ -254,6 +280,7 @@
                     localStorage.removeItem("jimin_firebase_config");
                     setIsFirebaseConnected(false);
                     dbRef.current = null;
+                    setPosts(DEFAULT_POSTS);
                     setFirebaseStatusMsg("未接続 (デフォルトのデモDBで動作中)");
                     triggerToast("設定が初期化されました。デモデータベースを適用します。");
                     return;
@@ -278,6 +305,7 @@
                         snapshot.forEach((doc) => {
                             fetched.push({ id: doc.id, ...doc.data() });
                         });
+                        setPosts(fetched.length > 0 ? fetched : DEFAULT_POSTS);
                     }, (error) => {
                         console.error("Firestore onSnapshot error:", error);
                         triggerToast("DB同期エラーが発生しました。");
