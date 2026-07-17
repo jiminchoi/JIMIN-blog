@@ -237,7 +237,8 @@
                     // (isPostsLoading is turned off once the first snapshot actually arrives)
                     fetchPostsFromFirebase(db);
                 } catch (err) {
-                    console.error("Firebase Init Error Details:", err);
+                    console.error(err.code);
+                    console.error(err.message);
                     setIsFirebaseConnected(false);
                     // Display the explicit detailed error instead of a generic message
                     setFirebaseStatusMsg(`❌ 接続失敗: ${err.message || err}`);
