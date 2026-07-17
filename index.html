@@ -24,8 +24,9 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, updateDoc, increment, addDoc, orderBy, where, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
         
-        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, setDoc, getDoc, getDocs, collection, query, updateDoc, increment, addDoc, orderBy, where, onSnapshot };
+        window.FirebaseSDK = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, setDoc, getDoc, getDocs, collection, query, updateDoc, increment, addDoc, orderBy, where, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
     </script>
 
     <style>
@@ -94,28 +95,17 @@
         const { useState, useEffect, useRef } = React;
 
         // Default Fallback Database to ensure immediate display if Firebase is not configured yet
-        const DEFAULT_POSTS = [
-            {
-                id: "demo-post-1",
-                title: "新しい始まり、新しい風 🌸",
-                content: "今日から新しい挑戦が始まります。期待と緊張が半分ずつですが、一歩一歩進んでいきたいと思います。応援よろしくお願いします！",
-                author: "Jimin",
-                coverType: "preset",
-                coverPreset: "linear-gradient(135deg, #1e3a8a, #3b82f6)",
-                likes: 12,
-                createdAt: new Date().toISOString()
-            },
-            {
-                id: "demo-post-2",
-                title: "雨の日のカフェ巡り ☕",
-                content: "東京の静かな路地裏で見つけた小さな喫茶店。雨の音を聴きながら飲む温かいブレンドコーヒーは格別でした。皆様も良い一日をお過ごしください。",
-                author: "管理者",
-                coverType: "preset",
-                coverPreset: "linear-gradient(135deg, #0f172a, #1e293b)",
-                likes: 8,
-                createdAt: new Date(Date.now() - 86400000).toISOString()
-            }
-        ];
+        const DEFAULT_POSTS = [];
+
+        // 앱에서 사용할 Firebase 프로젝트 설정 (하드코딩되어 화면에는 노출되지 않음)
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyCZuTMTQG3zq0xZctPBP9QC3MvfG14ZE4o",
+            authDomain: "blogjimin-20050.firebaseapp.com",
+            projectId: "blogjimin-20050",
+            storageBucket: "blogjimin-20050.firebasestorage.app",
+            messagingSenderId: "810707923301",
+            appId: "1:810707923301:web:c687e0c1c1586e5384718c"
+        };
 
         function App() {
             // --- UI & Customization States ---
@@ -127,11 +117,7 @@
             const [user, setUser] = useState(null); // { id, nickname, isGuest }
             const [loginId, setLoginId] = useState("");
             const [loginPw, setLoginPw] = useState("");
-            const [regId, setRegId] = useState("");
-            const [regPw, setRegPw] = useState("");
-            const [regNickname, setRegNickname] = useState("");
             const [authError, setAuthError] = useState("");
-            const [isRegistering, setIsRegistering] = useState(false);
 
             // --- Blog Post / Interaction States ---
             const [posts, setPosts] = useState(DEFAULT_POSTS);
@@ -143,16 +129,24 @@
             // --- Write Tab States ---
             const [newPostTitle, setNewPostTitle] = useState("");
             const [newPostContent, setNewPostContent] = useState("");
-            const [coverType, setCoverType] = useState("preset"); // 'preset' | 'url'
+            const [coverType, setCoverType] = useState("preset"); // 'preset' | 'upload'
             const [selectedPreset, setSelectedPreset] = useState("linear-gradient(135deg, #1e293b, #0f172a)");
             const [customImageUrl, setCustomImageUrl] = useState("");
 
-            // --- Firebase Configuration System ---
-            const [firebaseConfigStr, setFirebaseConfigStr] = useState("");
+            // --- Firebase Configuration System (자동 연결, 화면 입력 불필요) ---
             const [isFirebaseConnected, setIsFirebaseConnected] = useState(false);
-            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("未接続 (デフォルトのデモDBで動作中)");
+            const [firebaseStatusMsg, setFirebaseStatusMsg] = useState("接続を試みています...");
+            // 게시글을 DB에서 아직 불러오는 중인지 여부. 이 값이 true인 동안에는
+            // "投稿がありません" 같은 empty 문구를 절대 보여주지 않는다.
+            const [isPostsLoading, setIsPostsLoading] = useState(true);
             const dbRef = useRef(null);
             const authRef = useRef(null);
+            const storageRef = useRef(null);
+            const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+            const [selectedImageFile, setSelectedImageFile] = useState(null);
+            const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+            const [uploadProgress, setUploadProgress] = useState(0);
+            const [isUploadingImage, setIsUploadingImage] = useState(false);
 
             // Custom Preset Colors for Article Covers
             const presetGradients = [
@@ -174,57 +168,32 @@
                 setTimeout(() => setToastMessage(""), 4000);
             };
 
-            // Load custom theme, fonts, and custom Firebase credentials if stored in localStorage
+            // Load saved theme / font / user, and auto-connect to the built-in Firebase project
             useEffect(() => {
                 const savedTheme = localStorage.getItem("jimin_theme");
                 const savedFont = localStorage.getItem("jimin_font");
-                const savedFirebaseConfig = localStorage.getItem("jimin_firebase_config");
                 const savedUser = localStorage.getItem("jimin_user");
 
                 if (savedTheme) setTheme(savedTheme);
                 if (savedFont) setFontStyle(savedFont);
                 if (savedUser) setUser(JSON.parse(savedUser));
-                
-                if (savedFirebaseConfig) {
-                    setFirebaseConfigStr(savedFirebaseConfig);
-                    // Wait until external module loads FirebaseSDK completely
-                    const interval = setInterval(() => {
-                        if (window.FirebaseSDK) {
-                            clearInterval(interval);
-                            initFirebase(savedFirebaseConfig);
-                        }
-                    }, 100);
-                    return () => clearInterval(interval);
-                }
+
+                // 화면에서 API 키를 입력받지 않고, 스크립트에 내장된 FIREBASE_CONFIG로 자동 연결한다.
+                // Firebase SDK 모듈이 비동기로 로드되므로 준비될 때까지 대기 후 초기화.
+                const interval = setInterval(() => {
+                    if (window.FirebaseSDK) {
+                        clearInterval(interval);
+                        initFirebase(FIREBASE_CONFIG);
+                    }
+                }, 100);
+                return () => clearInterval(interval);
             }, []);
 
-            // Robust and lenient JavaScript object parser
-            const parseLenientJson = (str) => {
-                if (!str) return null;
-                let clean = str.trim();
-                
-                // Strip variables assignment if copied directly as code snippet (const config = { ... })
-                clean = clean.replace(/^(const|let|var|window\.)?\s*\w+\s*=\s*/, '');
-                if (clean.endsWith(';')) {
-                    clean = clean.slice(0, -1);
-                }
-                
+            // --- Initialize Firebase Client using the built-in config ---
+            const initFirebase = async (config) => {
                 try {
-                    // Safe evaluation of JS Object literals (handles unquoted keys, single quotes, trailing commas)
-                    const parserFn = new Function(`return (${clean});`);
-                    return parserFn();
-                } catch (e) {
-                    // Fallback to strict standard JSON
-                    return JSON.parse(clean);
-                }
-            };
-
-            // --- Initialize Custom Firebase Client dynamically (Auto-correcting Parser) ---
-            const initFirebase = async (configJson) => {
-                try {
-                    const config = parseLenientJson(configJson);
                     if (!config || !config.apiKey || !config.projectId) {
-                        throw new Error("フォーマットが正しくありません。apiKey や projectId などの必須キーを確認してください。");
+                        throw new Error("Firebase設定が正しくありません。apiKey や projectId などの必須キーを確認してください。");
                     }
 
                     const sdk = window.FirebaseSDK;
@@ -260,32 +229,23 @@
 
                     dbRef.current = db;
                     authRef.current = auth;
+                    storageRef.current = sdk.getStorage(app);
                     setIsFirebaseConnected(true);
                     setFirebaseStatusMsg("⚡ クラウドデータベース(Firestore)に正常接続されました！");
-                    localStorage.setItem("jimin_firebase_config", JSON.stringify(config));
 
                     // Fetch Posts instantly from the configured database
+                    // (isPostsLoading is turned off once the first snapshot actually arrives)
                     fetchPostsFromFirebase(db);
                 } catch (err) {
                     console.error("Firebase Init Error Details:", err);
                     setIsFirebaseConnected(false);
                     // Display the explicit detailed error instead of a generic message
                     setFirebaseStatusMsg(`❌ 接続失敗: ${err.message || err}`);
-                }
-            };
-
-            // Save Firebase Configuration manually
-            const handleSaveFirebaseConfig = () => {
-                if (!firebaseConfigStr) {
-                    localStorage.removeItem("jimin_firebase_config");
-                    setIsFirebaseConnected(false);
-                    dbRef.current = null;
+                    // 연결 자체가 실패했으면 더 이상 기다릴 필요가 없으므로 로딩을 종료하고
+                    // 데모 데이터로 폴백한다 (여기서만 "投稿がありません" 문구가 뜨게 됨).
                     setPosts(DEFAULT_POSTS);
-                    setFirebaseStatusMsg("未接続 (デフォルトのデモDBで動作中)");
-                    triggerToast("設定が初期化されました。デモデータベースを適用します。");
-                    return;
+                    setIsPostsLoading(false);
                 }
-                initFirebase(firebaseConfigStr);
             };
 
             // --- Fetch Posts ---
@@ -306,69 +266,32 @@
                             fetched.push({ id: doc.id, ...doc.data() });
                         });
                         setPosts(fetched.length > 0 ? fetched : DEFAULT_POSTS);
+                        // 실제로 DBから最初の応答が届いた時点でのみローディングを解除する。
+                        // これにより「最初の投稿を待ちわびています」は本当に0件の時だけ表示される。
+                        setIsPostsLoading(false);
                     }, (error) => {
                         console.error("Firestore onSnapshot error:", error);
                         triggerToast("DB同期エラーが発生しました。");
+                        setPosts(DEFAULT_POSTS);
+                        setIsPostsLoading(false);
                     });
                 } catch (e) {
                     console.error("Fetch posts failed: ", e);
+                    setPosts(DEFAULT_POSTS);
+                    setIsPostsLoading(false);
                 }
             };
 
-            // --- Custom User Registration & Login via Firestore Mock Layer ---
-            const handleRegister = async (e) => {
-                e.preventDefault();
-                setAuthError("");
-
-                if (!regId || !regPw || !regNickname) {
-                    setAuthError("全ての項目を入力してください。");
-                    return;
-                }
-
-                const newUserObj = { id: regId.trim(), nickname: regNickname.trim(), isGuest: false };
-
-                // If Firebase DB is connected, store user securely in standard path
-                if (dbRef.current) {
-                    try {
-                        const sdk = window.FirebaseSDK;
-                        const userDocRef = sdk.doc(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'users', regId.trim());
-                        
-                        // Check if User already exists
-                        const checkSnap = await sdk.getDoc(userDocRef);
-                        if (checkSnap.exists()) {
-                            setAuthError("既に存在するIDです。");
-                            return;
-                        }
-
-                        // Save new record
-                        await sdk.setDoc(userDocRef, {
-                            id: regId.trim(),
-                            password: regPw, // Simply stored for lightweight mock authentication
-                            nickname: regNickname.trim(),
-                            createdAt: new Date().toISOString()
-                        });
-
-                    } catch (err) {
-                        setAuthError("DB登録中にエラーが発生しました。");
-                        return;
-                    }
-                } else {
-                    // Local Storage fallback when DB is not yet connected
-                    const localUsers = JSON.parse(localStorage.getItem("local_users") || "{}");
-                    if (localUsers[regId]) {
-                        setAuthError("既に存在するIDです。");
-                        return;
-                    }
-                    localUsers[regId] = { password: regPw, nickname: regNickname };
-                    localStorage.setItem("local_users", JSON.stringify(localUsers));
-                }
-
-                setUser(newUserObj);
-                localStorage.setItem("jimin_user", JSON.stringify(newUserObj));
-                triggerToast("メンバー会員登録が完了しました！");
-                setIsRegistering(false);
+            // --- Password hashing (SHA-256, client-side) ---
+            // Prevents storing plaintext passwords in Firestore. Note: for real production auth,
+            // use Firebase Authentication's built-in email/password provider instead of this mock layer.
+            const hashPassword = async (plainText) => {
+                const data = new TextEncoder().encode(plainText);
+                const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+                return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
             };
 
+            // --- Login via Firestore (registration removed; users are provisioned directly in DB) ---
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setAuthError("");
@@ -385,8 +308,9 @@
                         const sdk = window.FirebaseSDK;
                         const userDocRef = sdk.doc(dbRef.current, 'artifacts', 'jimin-blog-app', 'public', 'data', 'users', loginId.trim());
                         const userSnap = await sdk.getDoc(userDocRef);
+                        const inputHash = await hashPassword(loginPw);
 
-                        if (userSnap.exists() && userSnap.data().password === loginPw) {
+                        if (userSnap.exists() && userSnap.data().passwordHash === inputHash) {
                             loggedInUser = {
                                 id: userSnap.data().id,
                                 nickname: userSnap.data().nickname,
@@ -401,15 +325,8 @@
                         return;
                     }
                 } else {
-                    // Local Storage verification fallback
-                    const localUsers = JSON.parse(localStorage.getItem("local_users") || "{}");
-                    const matchedUser = localUsers[loginId];
-                    if (matchedUser && matchedUser.password === loginPw) {
-                        loggedInUser = { id: loginId, nickname: matchedUser.nickname, isGuest: false };
-                    } else {
-                        setAuthError("IDまたはパスワードが一致しません。");
-                        return;
-                    }
+                    setAuthError("データベースに接続されていないためログインできません。");
+                    return;
                 }
 
                 setUser(loggedInUser);
@@ -430,6 +347,112 @@
                 triggerToast("ログアウトしました。");
             };
 
+            // --- Cover Image File Selection (device upload) ---
+            const handleImageFileChange = async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+
+                if (!file.type.startsWith("image/")) {
+                    triggerToast("画像ファイルのみアップロード可能です。");
+                    e.target.value = "";
+                    return;
+                }
+                if (file.size > MAX_IMAGE_SIZE) {
+                    triggerToast("ファイルサイズは5MBまでです。");
+                    e.target.value = "";
+                    return;
+                }
+
+                try {
+                    const resizedBlob = await resizeImage(file, 1280, 0.82);
+                    setSelectedImageFile(resizedBlob);
+                    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+                    setImagePreviewUrl(URL.createObjectURL(resizedBlob));
+                } catch (err) {
+                    console.error(err);
+                    // Resize failed for some reason (e.g. unusual format) — fall back to the original file
+                    setSelectedImageFile(file);
+                    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+                    setImagePreviewUrl(URL.createObjectURL(file));
+                }
+            };
+
+            // Resizes/compresses an image client-side before upload: scales the longest side down to
+            // maxDimension and re-encodes as JPEG at the given quality. Keeps uploads small & fast.
+            const resizeImage = (file, maxDimension, quality) => {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    const objectUrl = URL.createObjectURL(file);
+
+                    img.onload = () => {
+                        URL.revokeObjectURL(objectUrl);
+                        let { width, height } = img;
+
+                        if (width > maxDimension || height > maxDimension) {
+                            if (width >= height) {
+                                height = Math.round((height * maxDimension) / width);
+                                width = maxDimension;
+                            } else {
+                                width = Math.round((width * maxDimension) / height);
+                                height = maxDimension;
+                            }
+                        }
+
+                        const canvas = document.createElement("canvas");
+                        canvas.width = width;
+                        canvas.height = height;
+                        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+
+                        canvas.toBlob(
+                            (blob) => blob ? resolve(blob) : reject(new Error("Canvas toBlob failed")),
+                            "image/jpeg",
+                            quality
+                        );
+                    };
+                    img.onerror = () => {
+                        URL.revokeObjectURL(objectUrl);
+                        reject(new Error("Image load failed"));
+                    };
+                    img.src = objectUrl;
+                });
+            };
+
+            // Uploads the selected file to Firebase Storage and returns its public download URL.
+            // Falls back to an inline base64 data URL when Storage isn't connected (local/demo mode).
+            const uploadCoverImage = (fileOrBlob) => {
+                return new Promise((resolve, reject) => {
+                    if (storageRef.current) {
+                        const sdk = window.FirebaseSDK;
+                        const path = `covers/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+                        const fileRef = sdk.ref(storageRef.current, path);
+                        const task = sdk.uploadBytesResumable(fileRef, fileOrBlob);
+
+                        setIsUploadingImage(true);
+                        task.on("state_changed",
+                            (snapshot) => {
+                                setUploadProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+                            },
+                            (err) => {
+                                setIsUploadingImage(false);
+                                reject(err);
+                            },
+                            async () => {
+                                const url = await sdk.getDownloadURL(task.snapshot.ref);
+                                setIsUploadingImage(false);
+                                setUploadProgress(0);
+                                resolve(url);
+                            }
+                        );
+                    } else {
+                        // No Firebase connection: read as base64 so it can still be shown this session
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(fileOrBlob);
+                    }
+                });
+            };
+
             // --- Write and Publish Post ---
             const handlePublishPost = async (e) => {
                 e.preventDefault();
@@ -442,6 +465,21 @@
                     triggerToast("タイトルと内容を入力してください。");
                     return;
                 }
+                if (coverType === 'upload' && !selectedImageFile) {
+                    triggerToast("カバー画像を選択してください。");
+                    return;
+                }
+
+                let uploadedImageUrl = "";
+                if (coverType === 'upload' && selectedImageFile) {
+                    try {
+                        uploadedImageUrl = await uploadCoverImage(selectedImageFile);
+                    } catch (err) {
+                        console.error(err);
+                        triggerToast("画像アップロードに失敗しました。");
+                        return;
+                    }
+                }
 
                 const postPayload = {
                     title: newPostTitle,
@@ -449,7 +487,7 @@
                     author: user.nickname,
                     coverType: coverType,
                     coverPreset: coverType === 'preset' ? selectedPreset : "",
-                    imageUrl: coverType === 'url' ? customImageUrl : "",
+                    imageUrl: coverType === 'upload' ? uploadedImageUrl : "",
                     likes: 0,
                     createdAt: new Date().toISOString()
                 };
@@ -476,6 +514,9 @@
                 setNewPostTitle("");
                 setNewPostContent("");
                 setCustomImageUrl("");
+                if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+                setSelectedImageFile(null);
+                setImagePreviewUrl("");
                 setCurrentTab("home");
             };
 
@@ -670,101 +711,43 @@
 
                             {/* Authentication and Entrance card */}
                             <div className={`p-8 rounded-2xl ${styles.card} shadow-2xl`}>
-                                {isRegistering ? (
-                                    // --- Registration Form ---
-                                    <form onSubmit={handleRegister} className="space-y-4">
-                                        <h2 className="text-lg font-bold mb-4 text-center">新規会員登録</h2>
-                                        {authError && <div className="text-red-500 text-xs text-center">{authError}</div>}
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">希望ID</label>
-                                            <input 
-                                                type="text" 
-                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="希望のIDを入力してください"
-                                                value={regId}
-                                                onChange={e => setRegId(e.target.value)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">パスワード</label>
-                                            <input 
-                                                type="password" 
-                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="パスワードを入力してください"
-                                                value={regPw}
-                                                onChange={e => setRegPw(e.target.value)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">ニックネーム</label>
-                                            <input 
-                                                type="text" 
-                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="表示名（ニックネーム）"
-                                                value={regNickname}
-                                                onChange={e => setRegNickname(e.target.value)}
-                                            />
-                                        </div>
-                                        <button type="submit" className={`w-full py-3 rounded-lg font-bold transition duration-300 mt-2 ${styles.accent}`}>
-                                            登録を完了する
+                                {/* --- Login Form (registration removed; accounts are provisioned directly in the DB) --- */}
+                                <form onSubmit={handleLogin} className="space-y-4">
+                                    <h2 className="text-lg font-bold mb-4 text-center">ログイン</h2>
+                                    {authError && <div className="text-red-500 text-xs text-center">{authError}</div>}
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">ID</label>
+                                        <input 
+                                            type="text" 
+                                            className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                            placeholder="IDを入力してください"
+                                            value={loginId}
+                                            onChange={e => setLoginId(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">パスワード</label>
+                                        <input 
+                                            type="password" 
+                                            className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
+                                            placeholder="パスワードを入力してください"
+                                            value={loginPw}
+                                            onChange={e => setLoginPw(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="flex gap-3 pt-2">
+                                        <button type="submit" className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.accent}`}>
+                                            ログイン
                                         </button>
                                         <button 
                                             type="button" 
-                                            onClick={() => { setIsRegistering(false); setAuthError(""); }}
-                                            className="w-full text-xs text-center opacity-60 hover:opacity-100 transition mt-2 block"
+                                            onClick={handleGuestEntrance}
+                                            className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.btnSecondary}`}
                                         >
-                                            ログイン画面に戻る
+                                            ゲスト入場
                                         </button>
-                                    </form>
-                                ) : (
-                                    // --- Standard Login Form ---
-                                    <form onSubmit={handleLogin} className="space-y-4">
-                                        <h2 className="text-lg font-bold mb-4 text-center">ログイン</h2>
-                                        {authError && <div className="text-red-500 text-xs text-center">{authError}</div>}
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">ID</label>
-                                            <input 
-                                                type="text" 
-                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="IDを入力してください"
-                                                value={loginId}
-                                                onChange={e => setLoginId(e.target.value)}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider mb-1 opacity-75">パスワード</label>
-                                            <input 
-                                                type="password" 
-                                                className={`w-full px-4 py-2.5 rounded-lg border focus:outline-none focus:ring-2 ${styles.input}`}
-                                                placeholder="パスワードを入力してください"
-                                                value={loginPw}
-                                                onChange={e => setLoginPw(e.target.value)}
-                                            />
-                                        </div>
-                                        <div className="flex gap-3 pt-2">
-                                            <button type="submit" className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.accent}`}>
-                                                ログイン
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                onClick={handleGuestEntrance}
-                                                className={`flex-1 py-3 rounded-lg font-bold transition duration-300 ${styles.btnSecondary}`}
-                                            >
-                                                ゲスト入場
-                                            </button>
-                                        </div>
-                                        <div className="text-center pt-4 border-t border-slate-700/40">
-                                            <span className="text-xs opacity-60">初めてお越しですか？</span>
-                                            <button 
-                                                type="button" 
-                                                onClick={() => { setIsRegistering(true); setAuthError(""); }}
-                                                className="text-xs font-bold text-blue-400 hover:underline ml-1"
-                                            >
-                                                会員登録はこちら
-                                            </button>
-                                        </div>
-                                    </form>
-                                )}
+                                    </div>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -910,32 +893,16 @@
                                     </div>
                                 </div>
 
-                                {/* Cloud DB Connection Configurator */}
+                                {/* Cloud DB Connection Status (read-only, no API key input) */}
                                 <div className={`p-6 rounded-2xl border-2 border-dashed border-blue-500/30 ${styles.card}`}>
                                     <h2 className="text-lg font-bold mb-2 flex items-center gap-2 text-blue-400">
                                         <i className="fa-solid fa-database"></i> Firebase クラウド連携
                                     </h2>
                                     <p className="text-xs opacity-70 mb-4 leading-relaxed">
-                                        Vercel等へデプロイした後、データを永久保存して別デバイスでもリアルタイム共有可能にしたい場合は、ご自身のFirebase構成（JSON）を以下に貼り付けて適用してください。
+                                        クラウドデータベースはアプリに組み込まれた設定で自動的に接続されます。API キーなどを画面で入力する必要はありません。
                                     </p>
-                                    <div className="space-y-3">
-                                        <textarea 
-                                            className="w-full h-32 px-4 py-2 text-xs font-mono rounded-lg border bg-slate-950/60 focus:outline-none focus:ring-1 focus:ring-blue-500 border-slate-800 text-slate-100"
-                                            placeholder={`{\n  "apiKey": "AIzaSy...",\n  "authDomain": "...firebaseapp.com",\n  "projectId": "...",\n  "storageBucket": "...",\n  "messagingSenderId": "...",\n  "appId": "..."\n}`}
-                                            value={firebaseConfigStr}
-                                            onChange={e => setFirebaseConfigStr(e.target.value)}
-                                        />
-                                        <div className="flex flex-col gap-2">
-                                            <button 
-                                                onClick={handleSaveFirebaseConfig}
-                                                className={`w-full py-2.5 rounded-lg text-xs font-bold ${styles.accent}`}
-                                            >
-                                                設定を保存
-                                            </button>
-                                            <div className="text-xs font-semibold p-2.5 rounded-lg bg-black/20 border border-slate-800">
-                                                ステータス: {firebaseStatusMsg}
-                                            </div>
-                                        </div>
+                                    <div className={`text-xs font-semibold p-2.5 rounded-lg bg-black/20 border border-slate-800 ${isFirebaseConnected ? "text-emerald-400" : "text-amber-400"}`}>
+                                        ステータス: {firebaseStatusMsg}
                                     </div>
                                 </div>
                             </div>
@@ -944,7 +911,12 @@
                         {/* --- TAB 1: HOME FEED (INSTAGRAM STYLE) --- */}
                         {currentTab === "home" && (
                             <div className="space-y-6">
-                                {posts.length === 0 ? (
+                                {isPostsLoading ? (
+                                    <div className="text-center py-20 opacity-60">
+                                        <i className="fa-solid fa-circle-notch fa-spin text-4xl mb-4 text-blue-500"></i>
+                                        <p className="text-sm">読み込み中です...</p>
+                                    </div>
+                                ) : posts.length === 0 ? (
                                     <div className="text-center py-20 opacity-60">
                                         <i className="fa-solid fa-notes-medical text-4xl mb-4 text-blue-500"></i>
                                         <p className="text-sm">最初の投稿を待ちわびています...</p>
@@ -1044,10 +1016,10 @@
                                             </button>
                                             <button 
                                                 type="button"
-                                                onClick={() => setCoverType("url")}
-                                                className={`py-2 rounded-lg text-xs font-bold border transition ${coverType === 'url' ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
+                                                onClick={() => setCoverType("upload")}
+                                                className={`py-2 rounded-lg text-xs font-bold border transition ${coverType === 'upload' ? "border-blue-500 bg-blue-950/20" : "border-slate-800"}`}
                                             >
-                                                画像URLリンク
+                                                写真をアップロード
                                             </button>
                                         </div>
 
@@ -1068,13 +1040,27 @@
                                                 ))}
                                             </div>
                                         ) : (
-                                            <input 
-                                                type="text"
-                                                className={`w-full px-4 py-2.5 rounded-xl border text-xs focus:outline-none ${styles.input}`}
-                                                placeholder="https://images.unsplash.com/... (画像リンクを入力)"
-                                                value={customImageUrl}
-                                                onChange={e => setCustomImageUrl(e.target.value)}
-                                            />
+                                            <div className="space-y-2">
+                                                <input 
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={handleImageFileChange}
+                                                    className={`w-full px-4 py-2.5 rounded-xl border text-xs focus:outline-none file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white ${styles.input}`}
+                                                />
+                                                <p className="text-[10px] opacity-50">スマホ・PCの画像から選択（最大5MBまで）</p>
+
+                                                {imagePreviewUrl && (
+                                                    <div className="relative h-28 rounded-lg overflow-hidden border border-slate-700/30">
+                                                        <img src={imagePreviewUrl} className="w-full h-full object-cover" alt="preview" />
+                                                    </div>
+                                                )}
+
+                                                {isUploadingImage && (
+                                                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-blue-500 transition-all" style={{ width: `${uploadProgress}%` }}></div>
+                                                    </div>
+                                                )}
+                                            </div>
                                         )}
                                     </div>
 
@@ -1089,8 +1075,8 @@
                                         />
                                     </div>
 
-                                    <button type="submit" className={`w-full py-4 rounded-xl font-bold shadow-lg transition-all ${styles.accent}`}>
-                                        投稿して共有する
+                                    <button type="submit" disabled={isUploadingImage} className={`w-full py-4 rounded-xl font-bold shadow-lg transition-all disabled:opacity-50 ${styles.accent}`}>
+                                        {isUploadingImage ? `アップロード中... ${uploadProgress}%` : "投稿して共有する"}
                                     </button>
                                 </form>
                             </div>
